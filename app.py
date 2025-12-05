@@ -56,27 +56,27 @@ import resend
 resend.api_key = os.getenv("RESEND_API_KEY")
 
 def send_otp_email(email, otp):
+    import requests
+    RESEND_API_KEY = os.getenv("RESEND_API_KEY")1
+    url = "https://api.resend.com/emails"
+    payload = {
+        "from": "AskUni <onboarding@resend.dev>",
+        "to": email,
+        "subject": "Your AskUni OTP",
+        "html": f"<p>Your OTP is: <strong>{otp}</strong></p>"
+    }
+    headers = {
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json"
+    }
     try:
-        message = resend.Emails.send({
-            from: "AskUni <onboarding@resend.dev>",
-            "to": email,
-            "subject": "Your LPUQA Verification OTP",
-            "html": f"""
-                <div style="font-family: Arial; font-size: 16px;">
-                    <p>Your OTP for verification is:</p>
-                    <h2 style="color: #4F46E5;">{otp}</h2>
-                    <p>This code will expire in 10 minutes.</p>
-                </div>
-            """
-        })
-        print("Resend Response:", message)
-        return True
-
+        response = requests.post(url, json=payload, headers=headers)
+        print("Resend Email Response:", response.text)
+        return response.status_code == 200
     except Exception as e:
         print("Email Error:", e)
         return False
-
-
+    
 def create_jwt(user_id, email):
     payload = {"user_id": user_id, "email": email, "exp": datetime.utcnow() + timedelta(days=7)}
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
