@@ -55,31 +55,36 @@ def generate_otp():
 # -----------------------------------------------------
 # 📧 Brevo Email Sender (Universal OTP sender)
 # -----------------------------------------------------
-def send_otp_email(email, otp):
-    import requests, os
+import os
+import requests
 
-    api_key = os.getenv("BREVO_API_KEY")  # <-- Add this to .env
+def send_otp_email(email, otp):
+    BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+    
     url = "https://api.brevo.com/v3/smtp/email"
 
     payload = {
-        "sender": {"name": "AskUni", "email": "askuni.noreply@gmail.com"},
+        "sender": {"name": "AskUni", "email": os.getenv("BREVO_FROM_EMAIL")},
         "to": [{"email": email}],
-        "subject": "Your AskUni OTP",
-        "htmlContent": f"<p>Your OTP is <strong>{otp}</strong></p>"
+        "subject": "Your AskUni Email OTP",
+        "htmlContent": f"<p>Your OTP is: <strong>{otp}</strong></p>"
     }
 
     headers = {
         "accept": "application/json",
-        "api-key": api_key,
+        "api-key": BREVO_API_KEY,
         "content-type": "application/json"
     }
 
     try:
         response = requests.post(url, json=payload, headers=headers)
+
         print("Brevo API Response:", response.text)
-        return response.status_code in [200, 201]
+
+        return response.status_code == 201  # Brevo returns 201 for success
+
     except Exception as e:
-        print("Brevo API Error:", e)
+        print("Email sending error:", e)
         return False
 
 
