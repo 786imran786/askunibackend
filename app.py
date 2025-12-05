@@ -72,6 +72,7 @@ def send_otp_email(email, otp):
     try:
         response = requests.post(url, json=payload, headers=headers)
         print("Resend Email Response:", response.text)
+        print("DEBUG: Reached send-college-otp endpoint")
         return response.status_code == 200
     except Exception as e:
         print("Email Error:", e)
