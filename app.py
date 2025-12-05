@@ -52,23 +52,30 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 def generate_otp():
     return str(random.randint(100000, 999999))
 
+import resend
+resend.api_key = os.getenv("RESEND_API_KEY")
+
 def send_otp_email(email, otp):
-    sender = os.getenv("SMTP_EMAIL")
-    password = os.getenv("SMTP_PASSWORD")
-
-    msg = MIMEText(f"Your OTP for LPUQA verification is: {otp}")
-    msg["Subject"] = "LPUQA Verification OTP"
-    msg["From"] = sender
-    msg["To"] = email
-
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(sender, password)
-            smtp.send_message(msg)
+        message = resend.Emails.send({
+            from: "AskUni <onboarding@resend.dev>",
+            "to": email,
+            "subject": "Your LPUQA Verification OTP",
+            "html": f"""
+                <div style="font-family: Arial; font-size: 16px;">
+                    <p>Your OTP for verification is:</p>
+                    <h2 style="color: #4F46E5;">{otp}</h2>
+                    <p>This code will expire in 10 minutes.</p>
+                </div>
+            """
+        })
+        print("Resend Response:", message)
         return True
+
     except Exception as e:
         print("Email Error:", e)
         return False
+
 
 def create_jwt(user_id, email):
     payload = {"user_id": user_id, "email": email, "exp": datetime.utcnow() + timedelta(days=7)}
