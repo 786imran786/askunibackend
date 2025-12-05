@@ -6,3 +6,4 @@ pyjwt
 supabase
 requests
 gunicorn
+resend
