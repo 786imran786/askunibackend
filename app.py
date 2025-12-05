@@ -52,6 +52,9 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 def generate_otp():
     return str(random.randint(100000, 999999))
 
+# -----------------------------------------------------
+# 📧 Brevo Email Sender (Universal OTP sender)
+# -----------------------------------------------------
 def send_otp_email(email, otp):
     import smtplib
     from email.mime.text import MIMEText
@@ -63,33 +66,35 @@ def send_otp_email(email, otp):
     from_email = os.getenv("BREVO_FROM_EMAIL")
 
     # Email content
-    message = MIMEMultipart()
-    message["From"] = from_email
-    message["To"] = email
-    message["Subject"] = "Your AskUni OTP"
+    msg = MIMEMultipart()
+    msg["From"] = from_email
+    msg["To"] = email
+    msg["Subject"] = "Your AskUni OTP Verification"
 
     html_body = f"""
     <html>
         <body>
             <p>Your OTP is: <strong>{otp}</strong></p>
+            <p>This code will expire soon. Do not share it with anyone.</p>
         </body>
     </html>
     """
-    message.attach(MIMEText(html_body, "html"))
+
+    msg.attach(MIMEText(html_body, "html"))
 
     try:
-        # Brevo SMTP Relay
         with smtplib.SMTP("smtp-relay.brevo.com", 587) as server:
-            server.starttls()  # TLS for Brevo
+            server.starttls()
             server.login(smtp_user, smtp_pass)
-            server.sendmail(from_email, email, message.as_string())
+            server.sendmail(from_email, email, msg.as_string())
 
-        print("Brevo Email Sent Successfully")
+        print("Brevo: OTP email sent ✔️")
         return True
 
     except Exception as e:
-        print("Email Error:", e)
+        print("Brevo Email Error ❌:", e)
         return False
+
     
 def create_jwt(user_id, email):
     payload = {"user_id": user_id, "email": email, "exp": datetime.utcnow() + timedelta(days=7)}
