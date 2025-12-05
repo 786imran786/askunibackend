@@ -56,44 +56,32 @@ def generate_otp():
 # 📧 Brevo Email Sender (Universal OTP sender)
 # -----------------------------------------------------
 def send_otp_email(email, otp):
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-    import os
+    import requests, os
 
-    smtp_user = os.getenv("BREVO_SMTP_USER")
-    smtp_pass = os.getenv("BREVO_SMTP_PASS")
-    from_email = os.getenv("BREVO_FROM_EMAIL")
+    api_key = os.getenv("BREVO_API_KEY")  # <-- Add this to .env
+    url = "https://api.brevo.com/v3/smtp/email"
 
-    # Email content
-    msg = MIMEMultipart()
-    msg["From"] = from_email
-    msg["To"] = email
-    msg["Subject"] = "Your AskUni OTP Verification"
+    payload = {
+        "sender": {"name": "AskUni", "email": "askuni.noreply@gmail.com"},
+        "to": [{"email": email}],
+        "subject": "Your AskUni OTP",
+        "htmlContent": f"<p>Your OTP is <strong>{otp}</strong></p>"
+    }
 
-    html_body = f"""
-    <html>
-        <body>
-            <p>Your OTP is: <strong>{otp}</strong></p>
-            <p>This code will expire soon. Do not share it with anyone.</p>
-        </body>
-    </html>
-    """
-
-    msg.attach(MIMEText(html_body, "html"))
+    headers = {
+        "accept": "application/json",
+        "api-key": api_key,
+        "content-type": "application/json"
+    }
 
     try:
-        with smtplib.SMTP("smtp-relay.brevo.com", 587) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(from_email, email, msg.as_string())
-
-        print("Brevo: OTP email sent ✔️")
-        return True
-
+        response = requests.post(url, json=payload, headers=headers)
+        print("Brevo API Response:", response.text)
+        return response.status_code in [200, 201]
     except Exception as e:
-        print("Brevo Email Error ❌:", e)
+        print("Brevo API Error:", e)
         return False
+
 
     
 def create_jwt(user_id, email):
