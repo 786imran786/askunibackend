@@ -52,28 +52,41 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 def generate_otp():
     return str(random.randint(100000, 999999))
 
-import resend
-resend.api_key = os.getenv("RESEND_API_KEY")
-
 def send_otp_email(email, otp):
-    import requests
-    RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-    url = "https://api.resend.com/emails"
-    payload = {
-        "from": "AskUni <onboarding@resend.dev>",
-        "to": email,
-        "subject": "Your AskUni OTP",
-        "html": f"<p>Your OTP is: <strong>{otp}</strong></p>"
-    }
-    headers = {
-        "Authorization": f"Bearer {RESEND_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    import os
+
+    smtp_user = os.getenv("BREVO_SMTP_USER")
+    smtp_pass = os.getenv("BREVO_SMTP_PASS")
+    from_email = os.getenv("BREVO_FROM_EMAIL")
+
+    # Email content
+    message = MIMEMultipart()
+    message["From"] = from_email
+    message["To"] = email
+    message["Subject"] = "Your AskUni OTP"
+
+    html_body = f"""
+    <html>
+        <body>
+            <p>Your OTP is: <strong>{otp}</strong></p>
+        </body>
+    </html>
+    """
+    message.attach(MIMEText(html_body, "html"))
+
     try:
-        response = requests.post(url, json=payload, headers=headers)
-        print("Resend Email Response:", response.text)
-        print("DEBUG: Reached send-college-otp endpoint")
-        return response.status_code == 200
+        # Brevo SMTP Relay
+        with smtplib.SMTP("smtp-relay.brevo.com", 587) as server:
+            server.starttls()  # TLS for Brevo
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_email, email, message.as_string())
+
+        print("Brevo Email Sent Successfully")
+        return True
+
     except Exception as e:
         print("Email Error:", e)
         return False
