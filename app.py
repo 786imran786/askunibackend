@@ -57,7 +57,7 @@ resend.api_key = os.getenv("RESEND_API_KEY")
 
 def send_otp_email(email, otp):
     import requests
-    RESEND_API_KEY = os.getenv("RESEND_API_KEY")1
+    RESEND_API_KEY = os.getenv("RESEND_API_KEY")
     url = "https://api.resend.com/emails"
     payload = {
         "from": "AskUni <onboarding@resend.dev>",
