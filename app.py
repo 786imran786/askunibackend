@@ -16,16 +16,22 @@ from supabase import create_client
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True, resources={r"/*": {
-    "origins": [
-    "https://ask-uni.vercel.app",
-    "http://localhost:5500",
-    "http://localhost:3000"
-    ]
-,
-    "allow_headers": ["Content-Type", "Authorization"],
-    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-}})
+CORS(
+    app,
+    supports_credentials=True,
+    origins=["https://ask-uni.vercel.app"],
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+)
+
+@app.after_request
+def apply_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "https://ask-uni.vercel.app"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    return response
+
 
 
 # --- ENVIRONMENT VARIABLES ---
@@ -105,31 +111,6 @@ def is_valid_lpu_email(email):
 # ======================================================
 # 🔵 MIDDLEWARE FOR CORS PREFLIGHT
 # ======================================================
-@app.route('/api/<path:path>', methods=['OPTIONS'])
-def api_options(path):
-    response = make_response()
-    response.headers['Access-Control-Allow-Origin'] = 'https://ask-uni.vercel.app'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
-    return response, 200
-
-@app.after_request
-def after_request(response):
-    origin = request.headers.get("Origin")
-    allowed = [
-    "https://ask-uni.vercel.app",
-    "http://127.0.0.1:5500",
-    "http://localhost:5500",
-    "http://127.0.0.1:3000",
-    "http://localhost:3000"]
-    if origin in allowed:
-        response.headers.add("Access-Control-Allow-Origin", origin)    
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
-    return response
-
 
 # ======================================================
 # 🔵 HEALTH CHECK
