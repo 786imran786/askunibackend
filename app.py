@@ -785,7 +785,6 @@ def send_college_otp():
         "message": "OTP sent to your college email"
     })
 
-
 @app.route('/api/verify-college-otp', methods=['POST'])
 def verify_college_otp():
     payload = verify_jwt(request)
@@ -801,18 +800,32 @@ def verify_college_otp():
         return jsonify({"success": False, "message": "Missing fields"}), 400
 
     try:
+        # Fetch designation row
         response = supabase.table("designation").select("*").eq("user_id", user_id).execute()
+
+        # ❌ No row found
+        if not response.data:
+            return jsonify({"success": False, "message": "No OTP found. Please request a new one."}), 400
+
         record = response.data[0]
 
-        if record["otp"] == otp:
-            supabase.table("designation").update({
-                "is_college_email_verified": True,
-                "otp_verified": True
-            }).eq("user_id", user_id).execute()
+        # ❌ No OTP stored
+        if not record.get("otp"):
+            return jsonify({"success": False, "message": "OTP not generated."}), 400
 
-            return jsonify({"success": True, "message": "Email verified successfully"})
-        else:
-            return jsonify({"success": False, "message": "Invalid OTP"})
+        # ❌ OTP mismatch
+        if str(record["otp"]) != str(otp):
+            return jsonify({"success": False, "message": "Invalid OTP"}), 400
+
+        # ✅ OTP VERIFIED
+        supabase.table("designation").update({
+            "is_college_email_verified": True,
+            "otp_verified": True,
+            "otp": None
+        }).eq("user_id", user_id).execute()
+
+        return jsonify({"success": True, "message": "Email verified successfully"})
+
     except Exception as e:
         print("Error verifying OTP:", e)
         return jsonify({"success": False, "message": "Failed to verify OTP"}), 500
