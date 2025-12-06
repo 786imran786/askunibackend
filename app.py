@@ -58,33 +58,45 @@ def generate_otp():
 import os
 import requests
 
+
 def send_otp_email(email, otp):
-    BREVO_API_KEY = os.getenv("BREVO_API_KEY")
-    
-    url = "https://api.brevo.com/v3/smtp/email"
+    api_key = os.getenv("MJ_API_KEY")          # public key
+    secret_key = os.getenv("MJ_SECRET_KEY")    # private key
+    sender = os.getenv("MAILJET_SENDER")
+
+    url = "https://api.mailjet.com/v3.1/send"
 
     payload = {
-        "sender": {"name": "AskUni", "email": os.getenv("BREVO_FROM_EMAIL")},
-        "to": [{"email": email}],
-        "subject": "Your AskUni Email OTP",
-        "htmlContent": f"<p>Your OTP is: <strong>{otp}</strong></p>"
-    }
-
-    headers = {
-        "accept": "application/json",
-        "api-key": BREVO_API_KEY,
-        "content-type": "application/json"
+        "Messages": [
+            {
+                "From": {
+                    "Email": sender,
+                    "Name": "ASK-UNI"
+                },
+                "To": [
+                    {
+                        "Email": email
+                    }
+                ],
+                "Subject": "Your OTP for ASK-UNI Verification",
+                "TextPart": f"Your OTP for ASK-UNI verification is: {otp}",
+                "HTMLPart": f"<h2>Your OTP is <b>{otp}</b></h2>"
+            }
+        ]
     }
 
     try:
-        response = requests.post(url, json=payload, headers=headers)
+        response = requests.post(
+            url,
+            auth=(api_key, secret_key),   # ❤️ Mailjet Basic Auth
+            json=payload
+        )
 
-        print("Brevo API Response:", response.text)
+        print("Mailjet Response:", response.status_code, response.text)
 
-        return response.status_code == 201  # Brevo returns 201 for success
-
+        return response.status_code == 200
     except Exception as e:
-        print("Email sending error:", e)
+        print("Mailjet Error:", e)
         return False
 
 
