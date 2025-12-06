@@ -63,7 +63,9 @@ def send_otp_email(email, otp):
     api_key = os.getenv("MJ_API_KEY")          # public key
     secret_key = os.getenv("MJ_SECRET_KEY")    # private key
     sender = os.getenv("MAILJET_SENDER")
-
+    print("api key",api_key)
+    print("secret_key",secret_key)
+    print("sender",sender)
     url = "https://api.mailjet.com/v3.1/send"
 
     payload = {
