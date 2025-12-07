@@ -566,7 +566,7 @@ def save_personal_info():
     except Exception as e:
         print(f"Error saving personal info: {e}")
         return jsonify({"success": False, "message": "Failed to save personal info"}), 500
-
+        
 @app.route("/api/save-designation", methods=["POST"])
 def save_designation():
     # Verify JWT token
@@ -592,17 +592,25 @@ def save_designation():
             "designation_type": designation_type,
         }
 
-        # Add fields based on designation type
+        # ------------------------------------------------------
+        # STUDENT SECTION (College email optional)
+        # ------------------------------------------------------
         if designation_type == "student":
-            # Validate required student fields
-            required_fields = ["registration_no", "program", "department", "current_year", "graduation_year", "college_email"]
+
+            required_fields = [
+                "registration_no",
+                "program",
+                "department",
+                "current_year",
+                "graduation_year"
+            ]
+
             for field in required_fields:
                 if not data.get(field):
-                    return jsonify({"success": False, "message": f"{field.replace('_', ' ').title()} is required for students"})
-
-            # Validate LPU email for students
-            if not is_valid_lpu_email(data.get("college_email")):
-                return jsonify({"success": False, "message": "Please enter a valid LPU college email"})
+                    return jsonify({
+                        "success": False,
+                        "message": f"{field.replace('_', ' ').title()} is required for students"
+                    })
 
             designation_data.update({
                 "registration_no": data.get("registration_no"),
@@ -610,16 +618,43 @@ def save_designation():
                 "department": data.get("department"),
                 "current_year": data.get("current_year"),
                 "graduation_year": data.get("graduation_year"),
-                "college_email": data.get("college_email"),
-                "is_college_email_verified": data.get("is_college_email_verified", False),
             })
 
+            # OPTIONAL college email
+            college_email = data.get("college_email")
+
+            if college_email:
+                # Validate only if provided
+                if not is_valid_lpu_email(college_email):
+                    return jsonify({
+                        "success": False,
+                        "message": "Please enter a valid LPU college email"
+                    })
+
+                designation_data["college_email"] = college_email
+                designation_data["is_college_email_verified"] = data.get(
+                    "is_college_email_verified", False
+                )
+
+        # ------------------------------------------------------
+        # FACULTY SECTION
+        # ------------------------------------------------------
         elif designation_type == "faculty":
-            # Validate required faculty fields
-            required_fields = ["faculty_id", "faculty_department", "post", "courses_taught", "office_location", "experience"]
+            required_fields = [
+                "faculty_id",
+                "faculty_department",
+                "post",
+                "courses_taught",
+                "office_location",
+                "experience"
+            ]
+
             for field in required_fields:
                 if not data.get(field):
-                    return jsonify({"success": False, "message": f"{field.replace('_', ' ').title()} is required for faculty"})
+                    return jsonify({
+                        "success": False,
+                        "message": f"{field.replace('_', ' ').title()} is required for faculty"
+                    })
 
             designation_data.update({
                 "faculty_id": data.get("faculty_id"),
@@ -631,12 +666,24 @@ def save_designation():
                 "research": data.get("research"),
             })
 
+        # ------------------------------------------------------
+        # ALUMNI SECTION
+        # ------------------------------------------------------
         elif designation_type == "alumni":
-            # Validate required alumni fields
-            required_fields = ["graduation_year", "program", "department", "job_title", "company_name"]
+            required_fields = [
+                "graduation_year",
+                "program",
+                "department",
+                "job_title",
+                "company_name"
+            ]
+
             for field in required_fields:
                 if not data.get(field):
-                    return jsonify({"success": False, "message": f"{field.replace('_', ' ').title()} is required for alumni"})
+                    return jsonify({
+                        "success": False,
+                        "message": f"{field.replace('_', ' ').title()} is required for alumni"
+                    })
 
             designation_data.update({
                 "graduation_year": data.get("graduation_year"),
@@ -647,13 +694,19 @@ def save_designation():
                 "linkedin": data.get("linkedin"),
             })
 
-        # Insert or update designation
+        # ------------------------------------------------------
+        # Save to DB
+        # ------------------------------------------------------
         supabase.table("designation").upsert(designation_data).execute()
 
-        return jsonify({"success": True, "message": "Designation saved"})
+        return jsonify({"success": True, "message": "Designation saved successfully"})
+
     except Exception as e:
         print(f"Error saving designation: {e}")
-        return jsonify({"success": False, "message": "Failed to save designation"}), 500
+        return jsonify({
+            "success": False,
+            "message": "Failed to save designation"
+        }), 500
 
 @app.route("/api/save-general-profile", methods=["POST"])
 def save_general_profile():
