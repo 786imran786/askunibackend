@@ -720,70 +720,79 @@ def send_college_otp():
         return jsonify({"success": False, "message": "Unauthorized"}), 401
 
     data = request.json
+    # Prefer the user_id from JWT to avoid mismatch
+    user_id = payload.get("user_id")
     email = data.get("email")
-    user_id = data.get("user_id")
-    
+    # allow optional client-provided user_id only as a fallback (less preferred)
+    if not user_id:
+        user_id = data.get("user_id")
+
     if not email or not user_id:
         return jsonify({"success": False, "message": "Email or user ID missing"}), 400
-    
-    # Check valid LPU email
+
     if not is_valid_lpu_email(email):
         return jsonify({"success": False, "message": "Invalid LPU college email"}), 400
-    
-    # ---------------------------------------------------------
-    # 🔥 NEW CHECK → Prevent duplicate college email usage
-    # ---------------------------------------------------------
+
     try:
+        # Check if email already verified by another user
         existing = supabase.table("designation") \
-            .select("college_email, is_college_email_verified") \
+            .select("user_id,college_email,is_college_email_verified") \
             .eq("college_email", email) \
             .execute()
 
+        # Debug log
+        print("Existing check:", existing)
+
         if existing.data:
-            # If another user already verified with this email
-            if existing.data[0].get("is_college_email_verified"):
+            # If the email belongs to the same user, let them re-verify
+            if existing.data[0].get("user_id") != user_id and existing.data[0].get("is_college_email_verified"):
                 return jsonify({
                     "success": False,
-                    "message": "This college email is already verified."
+                    "message": "This college email is already verified by another account."
                 }), 400
-            
-            # If email exists but not verified
-            return jsonify({
-                "success": False,
-                "message": "This college email is already in use. Verify OTP instead."
-            }), 400
 
-    except Exception as e:
-        print("Email check error:", e)
-        return jsonify({"success": False, "message": "Failed to validate email"}), 500
-    # ---------------------------------------------------------
+            if existing.data[0].get("user_id") != user_id:
+                return jsonify({
+                    "success": False,
+                    "message": "This college email is already in use. Use a different email."
+                }), 400
 
-    # Generate OTP
-    otp = str(random.randint(100000, 999999))
+        # Generate OTP
+        otp = str(random.randint(100000, 999999))
 
-    # Save OTP
-    try:
-        supabase.table("designation").update({
+        # Use upsert so the row is created if it doesn't exist
+        upsert_payload = {
+            "user_id": user_id,
+            "college_email": email,
             "otp": otp,
             "otp_verified": False,
-            "college_email": email   # store email if not already present
-        }).eq("user_id", user_id).execute()
+            "is_college_email_verified": False
+        }
+
+        upsert_res = supabase.table("designation").upsert(upsert_payload).execute()
+        print("Upsert result:", upsert_res)
+
+        # check for success / permission errors
+        if getattr(upsert_res, "status_code", None) and upsert_res.status_code >= 400:
+            print("Supabase upsert error:", upsert_res)
+            return jsonify({"success": False, "message": "Failed to save OTP (db). Check permissions."}), 500
+
     except Exception as e:
         print("Error saving OTP:", e)
         return jsonify({"success": False, "message": "Failed to save OTP"}), 500
 
     # Send OTP email
     email_status = send_otp_email(email, otp)
-
     if not email_status:
+        # optional: clear OTP if email failed
+        try:
+            supabase.table("designation").update({"otp": None}).eq("user_id", user_id).execute()
+        except Exception as e:
+            print("Failed to clear OTP after email failure:", e)
         return jsonify({"success": False, "message": "Failed to send OTP email"}), 500
 
     print("OTP email sent successfully:", otp)
-
-    return jsonify({
-        "success": True,
-        "message": "OTP sent to your college email"
-    })
+    return jsonify({"success": True, "message": "OTP sent to your college email"})
 
 @app.route('/api/verify-college-otp', methods=['POST'])
 def verify_college_otp():
@@ -792,40 +801,38 @@ def verify_college_otp():
         return jsonify({"success": False, "message": "Unauthorized"}), 401
 
     data = request.json
+    # prefer JWT user_id again
+    user_id = payload.get("user_id")
     email = data.get("email")
     otp = data.get("otp")
-    user_id = data.get("user_id")
 
     if not email or not otp or not user_id:
         return jsonify({"success": False, "message": "Missing fields"}), 400
 
     try:
-        # Fetch designation row
         response = supabase.table("designation").select("*").eq("user_id", user_id).execute()
+        print("Verify fetch:", response)
 
-        # ❌ No row found
         if not response.data:
             return jsonify({"success": False, "message": "No OTP found. Please request a new one."}), 400
 
         record = response.data[0]
 
-        # ❌ No OTP stored
         if not record.get("otp"):
             return jsonify({"success": False, "message": "OTP not generated."}), 400
 
-        # ❌ OTP mismatch
         if str(record["otp"]) != str(otp):
             return jsonify({"success": False, "message": "Invalid OTP"}), 400
 
-        # ✅ OTP VERIFIED
-        supabase.table("designation").update({
+        # Mark verified
+        update_res = supabase.table("designation").update({
             "is_college_email_verified": True,
             "otp_verified": True,
             "otp": None
         }).eq("user_id", user_id).execute()
+        print("Verify update:", update_res)
 
         return jsonify({"success": True, "message": "Email verified successfully"})
-
     except Exception as e:
         print("Error verifying OTP:", e)
         return jsonify({"success": False, "message": "Failed to verify OTP"}), 500
