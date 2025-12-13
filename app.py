@@ -938,7 +938,348 @@ def get_profile_data():
         print(f"Error fetching profile data: {e}")
         return jsonify({"success": False, "message": "Failed to fetch profile data"}), 500
 
+# ======================================================
+# 🔵 QUESTIONS & ANSWERS ENDPOINTS
+# ======================================================
 
+@app.route("/api/questions", methods=["GET"])
+def get_questions():
+    try:
+        # Get questions with user info and answer count
+        questions_query = supabase.table("questions") \
+            .select("*, users(full_name, username)") \
+            .order("created_at", desc=True) \
+            .execute()
+        
+        questions = []
+        for q in questions_query.data:
+            # Get answer count
+            answers_query = supabase.table("answers") \
+                .select("*", count="exact") \
+                .eq("question_id", q["id"]) \
+                .execute()
+            
+            # Get tags for this question
+            tags_query = supabase.table("question_tags") \
+                .select("tags(name)") \
+                .eq("question_id", q["id"]) \
+                .execute()
+            
+            # Get vote counts
+            upvotes_query = supabase.table("votes") \
+                .select("*", count="exact") \
+                .eq("target_type", "question") \
+                .eq("target_id", q["id"]) \
+                .eq("vote_type", "upvote") \
+                .execute()
+            
+            downvotes_query = supabase.table("votes") \
+                .select("*", count="exact") \
+                .eq("target_type", "question") \
+                .eq("target_id", q["id"]) \
+                .eq("vote_type", "downvote") \
+                .execute()
+            
+            questions.append({
+                "id": q["id"],
+                "title": q["title"],
+                "content": q["content"],
+                "created_at": q["created_at"],
+                "author": q["users"],
+                "answer_count": answers_query.count if hasattr(answers_query, 'count') else len(answers_query.data),
+                "tags": [tag["tags"]["name"] for tag in tags_query.data],
+                "upvotes": upvotes_query.count if hasattr(upvotes_query, 'count') else len(upvotes_query.data),
+                "downvotes": downvotes_query.count if hasattr(downvotes_query, 'count') else len(downvotes_query.data)
+            })
+        
+        return jsonify({
+            "success": True,
+            "questions": questions
+        })
+    except Exception as e:
+        print(f"Error fetching questions: {e}")
+        return jsonify({"success": False, "message": "Failed to fetch questions"}), 500
+
+@app.route("/api/questions/<question_id>", methods=["GET"])
+def get_question_detail(question_id):
+    try:
+        # Get question details
+        question_query = supabase.table("questions") \
+            .select("*, users(full_name, username)") \
+            .eq("id", question_id) \
+            .execute()
+        
+        if not question_query.data:
+            return jsonify({"success": False, "message": "Question not found"}), 404
+        
+        question = question_query.data[0]
+        
+        # Increment view count
+        supabase.table("questions") \
+            .update({"views": question.get("views", 0) + 1}) \
+            .eq("id", question_id) \
+            .execute()
+        
+        # Get answers with user info
+        answers_query = supabase.table("answers") \
+            .select("*, users(full_name, username)") \
+            .eq("question_id", question_id) \
+            .order("created_at", desc=True) \
+            .execute()
+        
+        answers = []
+        for answer in answers_query.data:
+            # Get vote counts for each answer
+            upvotes_query = supabase.table("votes") \
+                .select("*", count="exact") \
+                .eq("target_type", "answer") \
+                .eq("target_id", answer["id"]) \
+                .eq("vote_type", "upvote") \
+                .execute()
+            
+            downvotes_query = supabase.table("votes") \
+                .select("*", count="exact") \
+                .eq("target_type", "answer") \
+                .eq("target_id", answer["id"]) \
+                .eq("vote_type", "downvote") \
+                .execute()
+            
+            answers.append({
+                "id": answer["id"],
+                "content": answer["content"],
+                "created_at": answer["created_at"],
+                "author": answer["users"],
+                "is_accepted": answer["is_accepted"],
+                "upvotes": upvotes_query.count if hasattr(upvotes_query, 'count') else len(upvotes_query.data),
+                "downvotes": downvotes_query.count if hasattr(downvotes_query, 'count') else len(downvotes_query.data)
+            })
+        
+        # Get tags
+        tags_query = supabase.table("question_tags") \
+            .select("tags(name)") \
+            .eq("question_id", question_id) \
+            .execute()
+        
+        # Get vote counts for question
+        upvotes_query = supabase.table("votes") \
+            .select("*", count="exact") \
+            .eq("target_type", "question") \
+            .eq("target_id", question_id) \
+            .eq("vote_type", "upvote") \
+            .execute()
+        
+        downvotes_query = supabase.table("votes") \
+            .select("*", count="exact") \
+            .eq("target_type", "question") \
+            .eq("target_id", question_id) \
+            .eq("vote_type", "downvote") \
+            .execute()
+        
+        return jsonify({
+            "success": True,
+            "question": {
+                "id": question["id"],
+                "title": question["title"],
+                "content": question["content"],
+                "created_at": question["created_at"],
+                "author": question["users"],
+                "views": question.get("views", 0) + 1,
+                "tags": [tag["tags"]["name"] for tag in tags_query.data],
+                "upvotes": upvotes_query.count if hasattr(upvotes_query, 'count') else len(upvotes_query.data),
+                "downvotes": downvotes_query.count if hasattr(downvotes_query, 'count') else len(downvotes_query.data)
+            },
+            "answers": answers
+        })
+    except Exception as e:
+        print(f"Error fetching question: {e}")
+        return jsonify({"success": False, "message": "Failed to fetch question"}), 500
+
+@app.route("/api/questions", methods=["POST"])
+def create_question():
+    # Verify JWT token
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    
+    data = request.json
+    title = data.get("title")
+    content = data.get("content")
+    tags = data.get("tags", [])
+    
+    if not title or not content:
+        return jsonify({"success": False, "message": "Title and content are required"}), 400
+    
+    try:
+        # Create question
+        question_result = supabase.table("questions").insert({
+            "user_id": payload["user_id"],
+            "title": title,
+            "content": content
+        }).execute()
+        
+        if not question_result.data:
+            return jsonify({"success": False, "message": "Failed to create question"}), 500
+        
+        question_id = question_result.data[0]["id"]
+        
+        # Add tags
+        for tag_name in tags:
+            # Get or create tag
+            tag_query = supabase.table("tags") \
+                .select("id") \
+                .eq("name", tag_name) \
+                .execute()
+            
+            tag_id = None
+            if tag_query.data:
+                tag_id = tag_query.data[0]["id"]
+            else:
+                # Create new tag
+                new_tag = supabase.table("tags").insert({
+                    "name": tag_name,
+                    "usage_count": 1
+                }).execute()
+                tag_id = new_tag.data[0]["id"]
+            
+            # Link tag to question
+            supabase.table("question_tags").insert({
+                "question_id": question_id,
+                "tag_id": tag_id
+            }).execute()
+        
+        return jsonify({
+            "success": True,
+            "message": "Question created successfully",
+            "question_id": question_id
+        })
+    except Exception as e:
+        print(f"Error creating question: {e}")
+        return jsonify({"success": False, "message": "Failed to create question"}), 500
+
+@app.route("/api/questions/<question_id>/answers", methods=["POST"])
+def create_answer(question_id):
+    # Verify JWT token
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    
+    data = request.json
+    content = data.get("content")
+    
+    if not content:
+        return jsonify({"success": False, "message": "Content is required"}), 400
+    
+    try:
+        # Check if question exists
+        question_query = supabase.table("questions") \
+            .select("id") \
+            .eq("id", question_id) \
+            .execute()
+        
+        if not question_query.data:
+            return jsonify({"success": False, "message": "Question not found"}), 404
+        
+        # Create answer
+        answer_result = supabase.table("answers").insert({
+            "question_id": question_id,
+            "user_id": payload["user_id"],
+            "content": content
+        }).execute()
+        
+        if not answer_result.data:
+            return jsonify({"success": False, "message": "Failed to create answer"}), 500
+        
+        return jsonify({
+            "success": True,
+            "message": "Answer posted successfully",
+            "answer_id": answer_result.data[0]["id"]
+        })
+    except Exception as e:
+        print(f"Error creating answer: {e}")
+        return jsonify({"success": False, "message": "Failed to post answer"}), 500
+
+@app.route("/api/vote", methods=["POST"])
+def vote():
+    # Verify JWT token
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    
+    data = request.json
+    target_type = data.get("target_type")  # "question" or "answer"
+    target_id = data.get("target_id")
+    vote_type = data.get("vote_type")  # "upvote" or "downvote"
+    
+    if not all([target_type, target_id, vote_type]):
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+    
+    if target_type not in ["question", "answer"] or vote_type not in ["upvote", "downvote"]:
+        return jsonify({"success": False, "message": "Invalid vote data"}), 400
+    
+    try:
+        # Check if user already voted
+        existing_vote = supabase.table("votes") \
+            .select("*") \
+            .eq("user_id", payload["user_id"]) \
+            .eq("target_type", target_type) \
+            .eq("target_id", target_id) \
+            .execute()
+        
+        if existing_vote.data:
+            # Update existing vote
+            supabase.table("votes") \
+                .update({"vote_type": vote_type}) \
+                .eq("id", existing_vote.data[0]["id"]) \
+                .execute()
+        else:
+            # Create new vote
+            supabase.table("votes").insert({
+                "user_id": payload["user_id"],
+                "target_type": target_type,
+                "target_id": target_id,
+                "vote_type": vote_type
+            }).execute()
+        
+        # Get updated vote counts
+        upvotes_query = supabase.table("votes") \
+            .select("*", count="exact") \
+            .eq("target_type", target_type) \
+            .eq("target_id", target_id) \
+            .eq("vote_type", "upvote") \
+            .execute()
+        
+        downvotes_query = supabase.table("votes") \
+            .select("*", count="exact") \
+            .eq("target_type", target_type) \
+            .eq("target_id", target_id) \
+            .eq("vote_type", "downvote") \
+            .execute()
+        
+        return jsonify({
+            "success": True,
+            "message": "Vote recorded",
+            "upvotes": upvotes_query.count if hasattr(upvotes_query, 'count') else len(upvotes_query.data),
+            "downvotes": downvotes_query.count if hasattr(downvotes_query, 'count') else len(downvotes_query.data)
+        })
+    except Exception as e:
+        print(f"Error recording vote: {e}")
+        return jsonify({"success": False, "message": "Failed to record vote"}), 500
+
+@app.route("/api/tags", methods=["GET"])
+def get_tags():
+    try:
+        tags_query = supabase.table("tags") \
+            .select("*") \
+            .order("usage_count", desc=True) \
+            .execute()
+        
+        return jsonify({
+            "success": True,
+            "tags": tags_query.data
+        })
+    except Exception as e:
+        print(f"Error fetching tags: {e}")
+        return jsonify({"success": False, "message": "Failed to fetch tags"}), 500
 # ======================================================
 # 🚀 START SERVER
 # ======================================================
