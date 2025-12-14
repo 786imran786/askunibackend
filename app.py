@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import re
 
 # Supabase
+import uuid
 from supabase import create_client
 
 load_dotenv()
@@ -55,6 +56,28 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def generate_otp():
     return str(random.randint(100000, 999999))
+
+def upload_file(file):
+    try:
+        filename = f"{uuid.uuid4()}_{file.filename}"
+        file_content = file.read()
+        
+        # Determine content type
+        content_type = file.content_type or "application/octet-stream"
+        
+        # Upload to Supabase Storage (bucket: 'images')
+        res = supabase.storage.from_("images").upload(
+            path=filename,
+            file=file_content,
+            file_options={"content-type": content_type}
+        )
+        
+        # Get public URL
+        public_url = supabase.storage.from_("images").get_public_url(filename)
+        return public_url
+    except Exception as e:
+        print(f"Error uploading file: {e}")
+        return None
 
 # -----------------------------------------------------
 # 📧 Brevo Email Sender (Universal OTP sender)
@@ -989,6 +1012,7 @@ def get_questions():
                 "title": q["title"],
                 "content": q["content"],
                 "created_at": q["created_at"],
+                "images": q.get("images", []),
                 "author": q["users"],
                 "answer_count": answers_query.count if hasattr(answers_query, 'count') else len(answers_query.data),
                 "tags": [tag["tags"]["name"] for tag in tags_query.data],
@@ -1052,6 +1076,7 @@ def get_question_detail(question_id):
                 "id": answer["id"],
                 "content": answer["content"],
                 "created_at": answer["created_at"],
+                "images": answer.get("images", []),
                 "author": answer["users"],
                 "is_accepted": answer["is_accepted"],
                 "upvotes": upvotes_query.count if hasattr(upvotes_query, 'count') else len(upvotes_query.data),
@@ -1086,6 +1111,7 @@ def get_question_detail(question_id):
                 "title": question["title"],
                 "content": question["content"],
                 "created_at": question["created_at"],
+                "images": question.get("images", []),
                 "author": question["users"],
                 "views": question.get("views", 0) + 1,
                 "tags": [tag["tags"]["name"] for tag in tags_query.data],
@@ -1105,21 +1131,51 @@ def create_question():
     if not payload:
         return jsonify({"success": False, "message": "Unauthorized"}), 401
     
-    data = request.json
-    title = data.get("title")
-    content = data.get("content")
-    tags = data.get("tags", [])
-    
-    if not title or not content:
-        return jsonify({"success": False, "message": "Title and content are required"}), 400
-    
+    title = None
+    content = None
+    tags = []
+    image_urls = []
+
     try:
-        # Create question
-        question_result = supabase.table("questions").insert({
+        if request.is_json:
+            data = request.json
+            title = data.get("title")
+            content = data.get("content")
+            tags = data.get("tags", [])
+        else:
+            # Handle FormData
+            title = request.form.get("title")
+            content = request.form.get("content")
+            tags_str = request.form.get("tags")
+            
+            if tags_str:
+                # Assuming comma-separated for simple FormData submission
+                tags = [t.strip() for t in tags_str.split(',') if t.strip()]
+            
+            # Handle file uploads
+            files = request.files.getlist("images")
+            for file in files:
+                if file.filename:
+                    url = upload_file(file)
+                    if url:
+                        image_urls.append(url)
+
+        if not title or not content:
+            return jsonify({"success": False, "message": "Title and content are required"}), 400
+        
+        # Create question (including images)
+        insert_data = {
             "user_id": payload["user_id"],
             "title": title,
             "content": content
-        }).execute()
+        }
+        
+        # Only add 'images' if we have them, to stay backward compatible (mostly)
+        # Note: Database must have 'images' column (array of text) for this to work.
+        if image_urls:
+            insert_data["images"] = image_urls
+            
+        question_result = supabase.table("questions").insert(insert_data).execute()
         
         if not question_result.data:
             return jsonify({"success": False, "message": "Failed to create question"}), 500
@@ -1167,13 +1223,27 @@ def create_answer(question_id):
     if not payload:
         return jsonify({"success": False, "message": "Unauthorized"}), 401
     
-    data = request.json
-    content = data.get("content")
-    
-    if not content:
-        return jsonify({"success": False, "message": "Content is required"}), 400
+    content = None
+    image_urls = []
     
     try:
+        if request.is_json:
+            data = request.json
+            content = data.get("content")
+        else:
+            content = request.form.get("content")
+            
+            # Handle file uploads
+            files = request.files.getlist("images")
+            for file in files:
+                if file.filename:
+                    url = upload_file(file)
+                    if url:
+                        image_urls.append(url)
+    
+        if not content:
+            return jsonify({"success": False, "message": "Content is required"}), 400
+    
         # Check if question exists
         question_query = supabase.table("questions") \
             .select("id") \
@@ -1184,11 +1254,16 @@ def create_answer(question_id):
             return jsonify({"success": False, "message": "Question not found"}), 404
         
         # Create answer
-        answer_result = supabase.table("answers").insert({
+        insert_data = {
             "question_id": question_id,
             "user_id": payload["user_id"],
             "content": content
-        }).execute()
+        }
+        
+        if image_urls:
+            insert_data["images"] = image_urls
+            
+        answer_result = supabase.table("answers").insert(insert_data).execute()
         
         if not answer_result.data:
             return jsonify({"success": False, "message": "Failed to create answer"}), 500
