@@ -20,7 +20,7 @@ app = Flask(__name__)
 CORS(
     app,
     supports_credentials=True,
-    origins=["https://ask-uni.vercel.app", "https://www.ask-uni.vercel.app"],
+    origins=["https://ask-uni.vercel.app", "https://www.ask-uni.vercel.app", "http://localhost:8081", "http://localhost:19000", "http://localhost:19006"],
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 )
@@ -28,7 +28,7 @@ CORS(
 @app.after_request
 def apply_cors(response):
     origin = request.headers.get('Origin')
-    allowed_origins = ["https://ask-uni.vercel.app", "https://www.ask-uni.vercel.app"]
+    allowed_origins = ["https://ask-uni.vercel.app", "https://www.ask-uni.vercel.app", "http://localhost:8081", "http://localhost:19000", "http://localhost:19006"]
     if origin in allowed_origins:
         response.headers["Access-Control-Allow-Origin"] = origin
     
@@ -36,7 +36,6 @@ def apply_cors(response):
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     return response
-
 
 
 # --- ENVIRONMENT VARIABLES ---
