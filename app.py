@@ -433,6 +433,9 @@ def google_callback():
     # Ensure separator is correct
     separator = "&" if "?" in base_redirect else "?"
 
+    # Check if email already exists (normal or google)
+    user_query = supabase.table("users").select("*").eq("email", email).execute()
+
     if user_query.data:
         # ⭐ Existing user (normal signup or google) → Link google_id
         user = user_query.data[0]
