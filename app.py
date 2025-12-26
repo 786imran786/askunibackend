@@ -383,12 +383,15 @@ def verify_token():
 
 @app.route("/auth/google")
 def google_login():
+    redirect_to = request.args.get('redirect_to', '')
+    
     google_auth_url = (
         "https://accounts.google.com/o/oauth2/v2/auth"
         f"?client_id={GOOGLE_CLIENT_ID}"
         f"&redirect_uri={GOOGLE_REDIRECT_URI}"
         "&response_type=code"
         "&scope=openid%20email%20profile"
+        f"&state={redirect_to}"
     )
     return redirect(google_auth_url)
 
@@ -423,8 +426,12 @@ def google_callback():
     google_id = userinfo["id"]
     name = userinfo["name"]
 
-    # Check if email already exists (normal or google)
-    user_query = supabase.table("users").select("*").eq("email", email).execute()
+    # Determine redirect target from state or default
+    state = request.args.get("state")
+    base_redirect = state if state else "https://ask-uni.vercel.app/home.html"
+    
+    # Ensure separator is correct
+    separator = "&" if "?" in base_redirect else "?"
 
     if user_query.data:
         # ⭐ Existing user (normal signup or google) → Link google_id
@@ -437,7 +444,7 @@ def google_callback():
 
         token = create_jwt(user["id"], email)
 
-        return redirect(f"https://ask-uni.vercel.app/home.html?token={token}")
+        return redirect(f"{base_redirect}{separator}token={token}")
 
     else:
         # ⭐ First-time Google login → create user
@@ -450,8 +457,11 @@ def google_callback():
 
         user_id = result.data[0]["id"]
         token = create_jwt(user_id, email)
-
-        return redirect(f"https://ask-uni.vercel.app/detail.html?token={token}&new_user=true")
+        
+        # If default fallback was used and it was home.html, switch to detail.html for new users if desired, 
+        # but for dynamic redirects (app), we likely handle onboarding on frontend.
+        # Keeping logic simple: redirect to the requested target with token.
+        return redirect(f"{base_redirect}{separator}token={token}&new_user=true")
 
 @app.route('/api/save-token-cookie', methods=['POST'])
 def save_token_cookie():
