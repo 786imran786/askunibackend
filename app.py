@@ -991,9 +991,20 @@ def get_profile_data():
 def get_questions():
     try:
         questions_query = supabase.table("questions") \
-            .select("*, users(full_name, username)") \
+            .select("*, users(id, full_name, username)") \
             .order("created_at", desc=True) \
             .execute()
+        
+        # Fetch author enrichment data
+        user_ids = list(set([q["users"]["id"] for q in questions_query.data if q.get("users") and "id" in q["users"]]))
+        user_profiles = {}
+        user_verifications = {}
+        if user_ids:
+            p_info = supabase.table("personal_info").select("user_id, profile_photo").in_("user_id", user_ids).execute()
+            for p in p_info.data: user_profiles[p["user_id"]] = p.get("profile_photo")
+            
+            d_info = supabase.table("designation").select("user_id, is_college_email_verified").in_("user_id", user_ids).execute()
+            for d in d_info.data: user_verifications[d["user_id"]] = d.get("is_college_email_verified", False)
         
         questions = []
         for q in questions_query.data:
@@ -1020,13 +1031,18 @@ def get_questions():
                 .eq("vote_type", "downvote") \
                 .execute()
             
+            author_data = q.get("users", {})
+            if author_data and "id" in author_data:
+                author_data["profile_photo"] = user_profiles.get(author_data["id"])
+                author_data["is_verified"] = user_verifications.get(author_data["id"], False)
+
             questions.append({
                 "id": q["id"],
                 "title": q["title"],
                 "content": q["content"],
                 "created_at": q["created_at"],
                 "images": q.get("images", []),
-                "author": q["users"],
+                "author": author_data,
                 "answer_count": answers_query.count if hasattr(answers_query, 'count') else len(answers_query.data),
                 "tags": [tag["tags"]["name"] for tag in tags_query.data],
                 "upvotes": upvotes_query.count if hasattr(upvotes_query, 'count') else len(upvotes_query.data),
@@ -1046,7 +1062,7 @@ def get_question_detail(question_id):
     try:
         # Get question details
         question_query = supabase.table("questions") \
-            .select("*, users(full_name, username)") \
+            .select("*, users(id, full_name, username)") \
             .eq("id", question_id) \
             .execute()
         
@@ -1063,10 +1079,33 @@ def get_question_detail(question_id):
         
         # Get answers with user info
         answers_query = supabase.table("answers") \
-            .select("*, users(full_name, username)") \
+            .select("*, users(id, full_name, username)") \
             .eq("question_id", question_id) \
             .order("created_at", desc=True) \
             .execute()
+        
+        # Enrich question author and answer authors
+        user_ids = set()
+        if question.get("users") and "id" in question["users"]:
+            user_ids.add(question["users"]["id"])
+        for a in answers_query.data:
+            if a.get("users") and "id" in a["users"]:
+                user_ids.add(a["users"]["id"])
+        
+        user_ids = list(user_ids)
+        user_profiles = {}
+        user_verifications = {}
+        if user_ids:
+            p_info = supabase.table("personal_info").select("user_id, profile_photo").in_("user_id", user_ids).execute()
+            for p in p_info.data: user_profiles[p["user_id"]] = p.get("profile_photo")
+            
+            d_info = supabase.table("designation").select("user_id, is_college_email_verified").in_("user_id", user_ids).execute()
+            for d in d_info.data: user_verifications[d["user_id"]] = d.get("is_college_email_verified", False)
+        
+        # Set question author enrichment
+        if question.get("users") and "id" in question["users"]:
+            question["users"]["profile_photo"] = user_profiles.get(question["users"]["id"])
+            question["users"]["is_verified"] = user_verifications.get(question["users"]["id"], False)
         
         answers = []
         for answer in answers_query.data:
@@ -1085,12 +1124,17 @@ def get_question_detail(question_id):
                 .eq("vote_type", "downvote") \
                 .execute()
             
+            author_data = answer.get("users", {})
+            if author_data and "id" in author_data:
+                author_data["profile_photo"] = user_profiles.get(author_data["id"])
+                author_data["is_verified"] = user_verifications.get(author_data["id"], False)
+                
             answers.append({
                 "id": answer["id"],
                 "content": answer["content"],
                 "created_at": answer["created_at"],
                 "images": answer.get("images", []),
-                "author": answer["users"],
+                "author": author_data,
                 "is_accepted": answer["is_accepted"],
                 "upvotes": upvotes_query.count if hasattr(upvotes_query, 'count') else len(upvotes_query.data),
                 "downvotes": downvotes_query.count if hasattr(downvotes_query, 'count') else len(downvotes_query.data)
