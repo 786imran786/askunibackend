@@ -987,6 +987,62 @@ def get_profile_data():
 # 🔵 QUESTIONS & ANSWERS ENDPOINTS
 # ======================================================
 
+def enrich_questions_data(questions_data):
+    # Fetch author enrichment data
+    user_ids = list(set([q["users"]["id"] for q in questions_data if q.get("users") and "id" in q["users"]]))
+    user_profiles = {}
+    user_verifications = {}
+    if user_ids:
+        p_info = supabase.table("personal_info").select("user_id, profile_photo").in_("user_id", user_ids).execute()
+        for p in p_info.data: user_profiles[p["user_id"]] = p.get("profile_photo")
+        
+        d_info = supabase.table("designation").select("user_id, is_college_email_verified").in_("user_id", user_ids).execute()
+        for d in d_info.data: user_verifications[d["user_id"]] = d.get("is_college_email_verified", False)
+    
+    questions = []
+    for q in questions_data:
+        answers_query = supabase.table("answers") \
+            .select("*", count="exact") \
+            .eq("question_id", q["id"]) \
+            .execute()
+        tags_query = supabase.table("question_tags") \
+            .select("tags(name)") \
+            .eq("question_id", q["id"]) \
+            .execute()
+        
+        upvotes_query = supabase.table("votes") \
+            .select("*", count="exact") \
+            .eq("target_type", "question") \
+            .eq("target_id", q["id"]) \
+            .eq("vote_type", "upvote") \
+            .execute()
+        
+        downvotes_query = supabase.table("votes") \
+            .select("*", count="exact") \
+            .eq("target_type", "question") \
+            .eq("target_id", q["id"]) \
+            .eq("vote_type", "downvote") \
+            .execute()
+        
+        author_data = q.get("users", {})
+        if author_data and "id" in author_data:
+            author_data["profile_photo"] = user_profiles.get(author_data["id"])
+            author_data["is_verified"] = user_verifications.get(author_data["id"], False)
+
+        questions.append({
+            "id": q["id"],
+            "title": q["title"],
+            "content": q["content"],
+            "created_at": q["created_at"],
+            "images": q.get("images", []),
+            "author": author_data,
+            "answer_count": answers_query.count if hasattr(answers_query, 'count') else len(answers_query.data),
+            "tags": [tag["tags"]["name"] for tag in tags_query.data],
+            "upvotes": upvotes_query.count if hasattr(upvotes_query, 'count') else len(upvotes_query.data),
+            "downvotes": downvotes_query.count if hasattr(downvotes_query, 'count') else len(downvotes_query.data)
+        })
+    return questions
+
 @app.route("/api/questions", methods=["GET"])
 def get_questions():
     try:
@@ -995,59 +1051,7 @@ def get_questions():
             .order("created_at", desc=True) \
             .execute()
         
-        # Fetch author enrichment data
-        user_ids = list(set([q["users"]["id"] for q in questions_query.data if q.get("users") and "id" in q["users"]]))
-        user_profiles = {}
-        user_verifications = {}
-        if user_ids:
-            p_info = supabase.table("personal_info").select("user_id, profile_photo").in_("user_id", user_ids).execute()
-            for p in p_info.data: user_profiles[p["user_id"]] = p.get("profile_photo")
-            
-            d_info = supabase.table("designation").select("user_id, is_college_email_verified").in_("user_id", user_ids).execute()
-            for d in d_info.data: user_verifications[d["user_id"]] = d.get("is_college_email_verified", False)
-        
-        questions = []
-        for q in questions_query.data:
-            answers_query = supabase.table("answers") \
-                .select("*", count="exact") \
-                .eq("question_id", q["id"]) \
-                .execute()
-            tags_query = supabase.table("question_tags") \
-                .select("tags(name)") \
-                .eq("question_id", q["id"]) \
-                .execute()
-            
-            upvotes_query = supabase.table("votes") \
-                .select("*", count="exact") \
-                .eq("target_type", "question") \
-                .eq("target_id", q["id"]) \
-                .eq("vote_type", "upvote") \
-                .execute()
-            
-            downvotes_query = supabase.table("votes") \
-                .select("*", count="exact") \
-                .eq("target_type", "question") \
-                .eq("target_id", q["id"]) \
-                .eq("vote_type", "downvote") \
-                .execute()
-            
-            author_data = q.get("users", {})
-            if author_data and "id" in author_data:
-                author_data["profile_photo"] = user_profiles.get(author_data["id"])
-                author_data["is_verified"] = user_verifications.get(author_data["id"], False)
-
-            questions.append({
-                "id": q["id"],
-                "title": q["title"],
-                "content": q["content"],
-                "created_at": q["created_at"],
-                "images": q.get("images", []),
-                "author": author_data,
-                "answer_count": answers_query.count if hasattr(answers_query, 'count') else len(answers_query.data),
-                "tags": [tag["tags"]["name"] for tag in tags_query.data],
-                "upvotes": upvotes_query.count if hasattr(upvotes_query, 'count') else len(upvotes_query.data),
-                "downvotes": downvotes_query.count if hasattr(downvotes_query, 'count') else len(downvotes_query.data)
-            })
+        questions = enrich_questions_data(questions_query.data)
         
         return jsonify({
             "success": True,
@@ -1056,6 +1060,69 @@ def get_questions():
     except Exception as e:
         print(f"Error fetching questions: {e}")
         return jsonify({"success": False, "message": "Failed to fetch questions"}), 500
+
+@app.route("/api/my-questions", methods=["GET"])
+def get_my_questions():
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    user_id = payload["user_id"] if isinstance(payload, dict) else payload
+
+    try:
+        questions_query = supabase.table("questions") \
+            .select("*, users(id, full_name, username)") \
+            .eq("user_id", user_id) \
+            .order("created_at", desc=True) \
+            .execute()
+        
+        questions = enrich_questions_data(questions_query.data)
+        
+        return jsonify({
+            "success": True,
+            "questions": questions
+        })
+    except Exception as e:
+        print(f"Error fetching my questions: {e}")
+        return jsonify({"success": False, "message": "Failed to fetch my questions"}), 500
+
+@app.route("/api/my-answers", methods=["GET"])
+def get_my_answers():
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    user_id = payload["user_id"] if isinstance(payload, dict) else payload
+
+    try:
+        # First, find all unique question IDs this user has answered
+        answers_query = supabase.table("answers") \
+            .select("question_id") \
+            .eq("user_id", user_id) \
+            .execute()
+            
+        question_ids = list(set([a["question_id"] for a in answers_query.data]))
+        
+        if not question_ids:
+            return jsonify({
+                "success": True,
+                "questions": []
+            })
+            
+        # Then, fetch those specific questions
+        questions_query = supabase.table("questions") \
+            .select("*, users(id, full_name, username)") \
+            .in_("id", question_ids) \
+            .order("created_at", desc=True) \
+            .execute()
+            
+        questions = enrich_questions_data(questions_query.data)
+        
+        return jsonify({
+            "success": True,
+            "questions": questions
+        })
+    except Exception as e:
+        print(f"Error fetching my answers: {e}")
+        return jsonify({"success": False, "message": "Failed to fetch my answers"}), 500
 
 @app.route("/api/questions/<question_id>", methods=["GET"])
 def get_question_detail(question_id):
