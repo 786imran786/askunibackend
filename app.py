@@ -1372,6 +1372,20 @@ def get_tags():
     except Exception as e:
         print(f"Error fetching tags: {e}")
         return jsonify({"success": False, "message": "Failed to fetch tags"}), 500
+#==================================================
+#logout
+#=================================================
+@app.route("/api/logout", methods=["GET", "POST"])
+def logout():
+    try:
+        resp = make_response(jsonify({"success": True, "message": "Logout successful"}))
+        IS_PROD = ENV == "production"
+        resp.set_cookie("auth_token", "", expires=0, httponly=True, secure=IS_PROD, samesite="None" if IS_PROD else "Lax")
+        return resp
+    except Exception as e:
+        print(f"Error logging out: {e}")
+        return jsonify({"success": False, "message": "Failed to log out"}), 500
+
 # ======================================================
 # 🚀 START SERVER
 # ======================================================
