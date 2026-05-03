@@ -20,7 +20,7 @@ app = Flask(__name__)
 CORS(
     app,
     supports_credentials=True,
-    origins=["https://ask-uni.vercel.app", "https://www.ask-uni.vercel.app", "http://localhost:8081", "http://localhost:19000", "http://localhost:19006"],
+    origins=["https://ask-uni.vercel.app", "https://www.ask-uni.vercel.app", "http://localhost:8081", "http://localhost:19000", "http://localhost:19006", "http://localhost:5500", "http://127.0.0.1:5500"],
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 )
@@ -28,7 +28,7 @@ CORS(
 @app.after_request
 def apply_cors(response):
     origin = request.headers.get('Origin')
-    allowed_origins = ["https://ask-uni.vercel.app", "https://www.ask-uni.vercel.app", "http://localhost:8081", "http://localhost:19000", "http://localhost:19006"]
+    allowed_origins = ["https://ask-uni.vercel.app", "https://www.ask-uni.vercel.app", "http://localhost:8081", "http://localhost:19000", "http://localhost:19006", "http://localhost:5500", "http://127.0.0.1:5500"]
     if origin in allowed_origins:
         response.headers["Access-Control-Allow-Origin"] = origin
     
@@ -45,6 +45,8 @@ JWT_SECRET = os.getenv("JWT_SECRET")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+ENV = os.getenv("ENV", "development")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -325,12 +327,14 @@ def login():
         "full_name": user["full_name"]
     })
 
+    IS_PROD = ENV == "production"
+
     resp.set_cookie(
         "auth_token",
         token,
         httponly=True,
-        secure=False,      # localhost only
-        samesite="Lax",
+        secure=IS_PROD,
+        samesite="None" if IS_PROD else "Lax",
         max_age=7 * 24 * 60 * 60
     )
 
@@ -428,7 +432,7 @@ def google_callback():
 
     # Determine redirect target from state or default
     state = request.args.get("state")
-    base_redirect = state if state else "https://ask-uni.vercel.app/home.html"
+    base_redirect = state if state else f"{FRONTEND_URL}/home.html"
     
     # Ensure separator is correct
     separator = "&" if "?" in base_redirect else "?"
@@ -472,13 +476,15 @@ def save_token_cookie():
     token = data.get("token")
 
     resp = make_response({"success": True})
+    IS_PROD = ENV == "production"
+
     resp.set_cookie(
-    "auth_token",
-    token,
-    httponly=True,
-    secure=False,       # ✔ localhost cannot use secure cookies
-    samesite="Lax",     # ✔ lets cross-domain requests work locally
-    max_age=7 * 24 * 60 * 60
+        "auth_token",
+        token,
+        httponly=True,
+        secure=IS_PROD,
+        samesite="None" if IS_PROD else "Lax",
+        max_age=7 * 24 * 60 * 60
     )
 
     return resp
@@ -984,7 +990,6 @@ def get_profile_data():
 @app.route("/api/questions", methods=["GET"])
 def get_questions():
     try:
-        # Get questions with user info and answer count
         questions_query = supabase.table("questions") \
             .select("*, users(full_name, username)") \
             .order("created_at", desc=True) \
@@ -992,19 +997,15 @@ def get_questions():
         
         questions = []
         for q in questions_query.data:
-            # Get answer count
             answers_query = supabase.table("answers") \
                 .select("*", count="exact") \
                 .eq("question_id", q["id"]) \
                 .execute()
-            
-            # Get tags for this question
             tags_query = supabase.table("question_tags") \
                 .select("tags(name)") \
                 .eq("question_id", q["id"]) \
                 .execute()
             
-            # Get vote counts
             upvotes_query = supabase.table("votes") \
                 .select("*", count="exact") \
                 .eq("target_type", "question") \
