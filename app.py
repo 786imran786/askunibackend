@@ -1524,45 +1524,6 @@ def logout():
         return jsonify({"success": False, "message": "Failed to log out"}), 500
 
 # ======================================================
-# 🔴 SSE STREAM ENDPOINT
-# ======================================================
-@app.route("/api/stream", methods=["GET"])
-def sse_stream():
-    """Keep-alive SSE endpoint. Each connected browser tab gets its own queue."""
-    client_q = queue.Queue(maxsize=20)
-    with _sse_lock:
-        _sse_clients.append(client_q)
-
-    def generate():
-        # Send a heartbeat immediately so the browser knows it connected
-        yield "event: connected\ndata: {}\n\n"
-        try:
-            while True:
-                try:
-                    # Block for up to 25 s, then send a keepalive comment
-                    msg = client_q.get(timeout=25)
-                    yield msg
-                except queue.Empty:
-                    yield ": keepalive\n\n"   # prevents proxy timeouts
-        except GeneratorExit:
-            pass
-        finally:
-            with _sse_lock:
-                if client_q in _sse_clients:
-                    _sse_clients.remove(client_q)
-
-    response = Response(generate(), mimetype="text/event-stream")
-    response.headers["Cache-Control"] = "no-cache"
-    response.headers["X-Accel-Buffering"] = "no"
-    # Copy CORS headers from after_request
-    origin = request.headers.get("Origin", "")
-    allowed = ["https://ask-uni.vercel.app", "http://localhost:5500", "http://127.0.0.1:5500"]
-    if origin in allowed:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-    return response
-
-# ======================================================
 # 🚀 START SERVER
 # ======================================================
 
