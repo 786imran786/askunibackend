@@ -1510,6 +1510,294 @@ def get_tags():
         print(f"Error fetching tags: {e}")
         return jsonify({"success": False, "message": "Failed to fetch tags"}), 500
 #==================================================
+# 🔵 FORUM ENDPOINTS
+#==================================================
+
+@app.route("/api/forums", methods=["GET"])
+def get_forums():
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+        
+    try:
+        user_id = payload["user_id"]
+        
+        # Get all forums
+        forums_query = supabase.table("forums").select("*").order("created_at", desc=True).execute()
+        forums_data = forums_query.data
+        
+        # We need to add 'members' count, 'joined' status for current user
+        members_query = supabase.table("forum_members").select("*").execute()
+        members_data = members_query.data
+        
+        forum_members_map = {}
+        user_joined_map = {}
+        
+        for m in members_data:
+            fid = m["forum_id"]
+            uid = m["user_id"]
+            forum_members_map[fid] = forum_members_map.get(fid, 0) + 1
+            if uid == user_id:
+                user_joined_map[fid] = True
+                
+        result = []
+        for f in forums_data:
+            fid = f["id"]
+            f["members"] = forum_members_map.get(fid, 0)
+            f["joined"] = user_joined_map.get(fid, False)
+            result.append(f)
+            
+        return jsonify({"success": True, "forums": result})
+    except Exception as e:
+        print(f"Error fetching forums: {e}")
+        return jsonify({"success": False, "message": "Failed to fetch forums"}), 500
+
+@app.route("/api/forums", methods=["POST"])
+def create_forum():
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+        
+    data = request.json
+    title = data.get("title")
+    description = data.get("description")
+    visibility = data.get("visibility")
+    
+    if not all([title, description, visibility]):
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+        
+    try:
+        user_id = payload["user_id"]
+        
+        res = supabase.table("forums").insert({
+            "title": title,
+            "description": description,
+            "visibility": visibility,
+            "admin_id": user_id
+        }).execute()
+        
+        forum_id = res.data[0]["id"]
+        
+        # Add creator as a member
+        supabase.table("forum_members").insert({
+            "forum_id": forum_id,
+            "user_id": user_id
+        }).execute()
+        
+        return jsonify({"success": True, "message": "Forum created successfully", "forum_id": forum_id})
+    except Exception as e:
+        print(f"Error creating forum: {e}")
+        return jsonify({"success": False, "message": "Failed to create forum"}), 500
+
+@app.route("/api/forums/<int:forum_id>/join", methods=["POST"])
+def join_forum(forum_id):
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+        
+    try:
+        user_id = payload["user_id"]
+        
+        forum_res = supabase.table("forums").select("*").eq("id", forum_id).execute()
+        if not forum_res.data:
+            return jsonify({"success": False, "message": "Forum not found"}), 404
+            
+        forum = forum_res.data[0]
+        
+        member_res = supabase.table("forum_members").select("*").eq("forum_id", forum_id).eq("user_id", user_id).execute()
+        if member_res.data:
+            return jsonify({"success": False, "message": "Already joined"}), 400
+            
+        if forum["visibility"] == "global":
+            supabase.table("forum_members").insert({"forum_id": forum_id, "user_id": user_id}).execute()
+            return jsonify({"success": True, "message": "Joined forum successfully", "status": "joined"})
+        else:
+            req_res = supabase.table("forum_requests").select("*").eq("forum_id", forum_id).eq("user_id", user_id).eq("status", "pending").execute()
+            if req_res.data:
+                return jsonify({"success": False, "message": "Request already pending"}), 400
+                
+            supabase.table("forum_requests").insert({"forum_id": forum_id, "user_id": user_id, "status": "pending"}).execute()
+            return jsonify({"success": True, "message": "Join request sent to admin", "status": "pending"})
+            
+    except Exception as e:
+        print(f"Error joining forum: {e}")
+        return jsonify({"success": False, "message": "Failed to join forum"}), 500
+
+@app.route("/api/forums/requests", methods=["GET"])
+def get_forum_requests():
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+        
+    try:
+        user_id = payload["user_id"]
+        
+        my_forums = supabase.table("forums").select("id, title").eq("admin_id", user_id).execute()
+        my_forum_ids = [f["id"] for f in my_forums.data]
+        
+        if not my_forum_ids:
+            return jsonify({"success": True, "requests": []})
+            
+        requests_res = supabase.table("forum_requests").select("*, users(full_name, email, profile_photo), forums(title)").in_("forum_id", my_forum_ids).eq("status", "pending").execute()
+        
+        result = []
+        for req in requests_res.data:
+            result.append({
+                "id": req["id"],
+                "forum_id": req["forum_id"],
+                "forum_title": req["forums"]["title"] if req.get("forums") else "Unknown",
+                "user_id": req["user_id"],
+                "user_name": req["users"]["full_name"] if req.get("users") else "Unknown",
+                "user_email": req["users"]["email"] if req.get("users") else "",
+                "profile_photo": req["users"]["profile_photo"] if req.get("users") else "",
+                "status": req["status"]
+            })
+            
+        return jsonify({"success": True, "requests": result})
+    except Exception as e:
+        print(f"Error fetching requests: {e}")
+        return jsonify({"success": False, "message": "Failed to fetch requests"}), 500
+
+@app.route("/api/forums/requests/<int:request_id>", methods=["POST"])
+def respond_forum_request(request_id):
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+        
+    data = request.json
+    action = data.get("action")
+    
+    if action not in ["approve", "reject"]:
+        return jsonify({"success": False, "message": "Invalid action"}), 400
+        
+    try:
+        user_id = payload["user_id"]
+        
+        req_res = supabase.table("forum_requests").select("*, forums(admin_id)").eq("id", request_id).execute()
+        if not req_res.data:
+            return jsonify({"success": False, "message": "Request not found"}), 404
+            
+        req = req_res.data[0]
+        
+        if req["forums"]["admin_id"] != user_id:
+            return jsonify({"success": False, "message": "Forbidden"}), 403
+            
+        status = "approved" if action == "approve" else "rejected"
+        
+        supabase.table("forum_requests").update({"status": status}).eq("id", request_id).execute()
+        
+        if status == "approved":
+            supabase.table("forum_members").upsert({
+                "forum_id": req["forum_id"],
+                "user_id": req["user_id"]
+            }).execute()
+            
+        return jsonify({"success": True, "message": f"Request {status}"})
+    except Exception as e:
+        print(f"Error processing request: {e}")
+        return jsonify({"success": False, "message": "Failed to process request"}), 500
+
+@app.route("/api/forums/<int:forum_id>/messages", methods=["GET"])
+def get_forum_messages(forum_id):
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+        
+    try:
+        user_id = payload["user_id"]
+        
+        member_res = supabase.table("forum_members").select("*").eq("forum_id", forum_id).eq("user_id", user_id).execute()
+        if not member_res.data:
+            return jsonify({"success": False, "message": "Not a member of this forum"}), 403
+            
+        msg_res = supabase.table("forum_messages").select("*, users!forum_messages_user_id_fkey(full_name)").eq("forum_id", forum_id).order("created_at", desc=False).execute()
+        
+        msg_ids = [m["id"] for m in msg_res.data]
+        likes_map = {mid: 0 for mid in msg_ids}
+        user_liked_map = {mid: False for mid in msg_ids}
+        
+        if msg_ids:
+            likes_res = supabase.table("forum_message_likes").select("*").in_("message_id", msg_ids).execute()
+            for l in likes_res.data:
+                mid = l["message_id"]
+                likes_map[mid] += 1
+                if l["user_id"] == user_id:
+                    user_liked_map[mid] = True
+                    
+        result = []
+        for m in msg_res.data:
+            dt = datetime.fromisoformat(m["created_at"].replace('Z', '+00:00'))
+            time_str = dt.strftime("%I:%M %p")
+            
+            result.append({
+                "id": m["id"],
+                "text": m["content"],
+                "author": m["users"]["full_name"] if m.get("users") else "Unknown",
+                "authorId": m["user_id"],
+                "time": time_str,
+                "likes": likes_map.get(m["id"], 0),
+                "likedByMe": user_liked_map.get(m["id"], False)
+            })
+            
+        return jsonify({"success": True, "messages": result})
+    except Exception as e:
+        print(f"Error fetching messages: {e}")
+        return jsonify({"success": False, "message": "Failed to fetch messages"}), 500
+
+@app.route("/api/forums/<int:forum_id>/messages", methods=["POST"])
+def post_forum_message(forum_id):
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+        
+    data = request.json
+    content = data.get("content")
+    
+    if not content:
+        return jsonify({"success": False, "message": "Message content required"}), 400
+        
+    try:
+        user_id = payload["user_id"]
+        
+        member_res = supabase.table("forum_members").select("*").eq("forum_id", forum_id).eq("user_id", user_id).execute()
+        if not member_res.data:
+            return jsonify({"success": False, "message": "Not a member"}), 403
+            
+        supabase.table("forum_messages").insert({
+            "forum_id": forum_id,
+            "user_id": user_id,
+            "content": content
+        }).execute()
+        
+        return jsonify({"success": True, "message": "Message sent"})
+    except Exception as e:
+        print(f"Error posting message: {e}")
+        return jsonify({"success": False, "message": "Failed to post message"}), 500
+
+@app.route("/api/forums/messages/<int:message_id>/like", methods=["POST"])
+def toggle_message_like(message_id):
+    payload = verify_jwt(request)
+    if not payload:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+        
+    try:
+        user_id = payload["user_id"]
+        
+        like_res = supabase.table("forum_message_likes").select("*").eq("message_id", message_id).eq("user_id", user_id).execute()
+        
+        if like_res.data:
+            supabase.table("forum_message_likes").delete().eq("message_id", message_id).eq("user_id", user_id).execute()
+            action = "unliked"
+        else:
+            supabase.table("forum_message_likes").insert({"message_id": message_id, "user_id": user_id}).execute()
+            action = "liked"
+            
+        return jsonify({"success": True, "action": action})
+    except Exception as e:
+        print(f"Error toggling like: {e}")
+        return jsonify({"success": False, "message": "Failed to toggle like"}), 500
+
+#==================================================
 #logout
 #=================================================
 @app.route("/api/logout", methods=["GET", "POST"])
