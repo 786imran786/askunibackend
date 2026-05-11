@@ -6,4 +6,6 @@ pyjwt
 supabase
 requests
 gunicorn
-resend
+redis
+Pillow
+orjson
