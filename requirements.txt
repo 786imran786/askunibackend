@@ -1,11 +1,32 @@
-Flask
-flask-cors
-python-dotenv
-passlib
-pyjwt
-supabase
-requests
-gunicorn
-redis
-Pillow
-orjson
+# askUNI Backend — Python Dependencies
+# Generated: 2026-05-11
+# Pin exact versions for reproducible Render deployments
+
+# ── Core Framework ────────────────────────────────────────
+Flask==2.3.3
+flask-cors==5.0.1
+
+# ── Configuration ─────────────────────────────────────────
+python-dotenv==1.1.0
+
+# ── Authentication ────────────────────────────────────────
+passlib==1.7.4
+PyJWT==2.9.0
+
+# ── Database ──────────────────────────────────────────────
+supabase==2.17.0
+
+# ── HTTP ──────────────────────────────────────────────────
+requests==2.32.3
+
+# ── Production Server ─────────────────────────────────────
+gunicorn==25.1.0
+
+# ── Caching & Realtime (Redis Pub/Sub + SSE) ──────────────
+redis==5.2.1
+
+# ── Image Processing ──────────────────────────────────────
+Pillow==11.0.0
+
+# ── Fast JSON Serialisation ───────────────────────────────
+orjson==3.10.15
