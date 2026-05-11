@@ -147,6 +147,7 @@ def create_question(payload):
             return jsonify({"success": False, "message": "Failed to create question"}), 500
 
         question_id = question_result.data[0]["id"]
+        question_created_at = question_result.data[0].get("created_at", "")
 
         # Add tags
         for tag_name in tags:
@@ -167,9 +168,26 @@ def create_question(payload):
             }).execute()
 
         # 🚀 Invalidate caches & broadcast SSE
+        # Include enough data so the frontend can render immediately
+        user_res = supabase.table("personal_info") \
+            .select("full_name, profile_photo") \
+            .eq("user_id", payload["user_id"]).execute()
+        author_name = user_res.data[0]["full_name"] if user_res.data else "Anonymous"
+
         invalidate_question_caches()
         invalidate(INVALIDATE_TAGS)
-        broadcast_global("new_question", {"question_id": question_id})
+        broadcast_global("new_question", {
+            "question_id": question_id,
+            "title": title,
+            "content": content,
+            "tags": tags,
+            "author": {"full_name": author_name, "profile_photo": "", "is_verified": False},
+            "images": image_urls,
+            "created_at": question_created_at,
+            "upvotes": 0,
+            "downvotes": 0,
+            "answer_count": 0,
+        })
 
         return jsonify({
             "success": True,
@@ -225,11 +243,12 @@ def create_answer(payload, question_id):
         if not answer_result.data:
             return jsonify({"success": False, "message": "Failed to create answer"}), 500
 
-        # Invalidate caches
+        # Invalidate caches & broadcast
         invalidate_question_caches(question_id)
         broadcast_global("new_answer", {
             "question_id": question_id,
             "answer_id": answer_result.data[0]["id"],
+            "answer_count_delta": 1,   # frontend increments the count
         })
 
         return jsonify({
@@ -291,8 +310,14 @@ def vote(payload):
         upvotes = sum(1 for v in votes_res.data if v["vote_type"] == "upvote")
         downvotes = sum(1 for v in votes_res.data if v["vote_type"] == "downvote")
 
-        # Invalidate caches
+        # Invalidate caches & broadcast vote update to ALL users
         invalidate_question_caches(target_id if target_type == "question" else None)
+        broadcast_global("vote_update", {
+            "target_type": target_type,
+            "target_id": target_id,
+            "upvotes": upvotes,
+            "downvotes": downvotes,
+        })
 
         return jsonify({
             "success": True,

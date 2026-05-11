@@ -3,7 +3,7 @@ Forum business logic — messages with pagination, caching, and realtime pub/sub
 """
 from datetime import datetime
 from database.supabase_client import supabase
-from cache.redis_client import get_cache, set_cache, invalidate, publish
+from cache.redis_client import get_cache, set_cache, invalidate
 from cache import cache_keys
 from config import CACHE_TTL_FORUM_MSG, FORUM_MSG_PAGE_SIZE, MAX_PAGE_SIZE
 
@@ -115,6 +115,9 @@ def get_forum_messages(forum_id, user_id, args) -> dict:
 
 def post_message(forum_id, user_id, content) -> dict:
     """Insert a message and broadcast via Redis Pub/Sub."""
+    # Lazy import to avoid circular dependency
+    from sse.sse_manager import broadcast_forum_global
+
     res = supabase.table("forum_messages").insert({
         "forum_id": forum_id,
         "user_id": user_id,
@@ -133,20 +136,25 @@ def post_message(forum_id, user_id, content) -> dict:
         .execute()
     author_name = user_res.data[0]["full_name"] if user_res.data else "Unknown"
 
-    # Broadcast to Redis for SSE
-    publish(f"sse:forum:{forum_id}:message", {
+    # Build the message payload — matches what the frontend expects
+    msg_payload = {
         "id": msg["id"],
         "text": content,
         "author": author_name,
         "authorId": user_id,
         "forum_id": forum_id,
+        "likes": 0,
+        "likedByMe": False,
         "time": datetime.utcnow().strftime("%I:%M %p"),
-    })
+    }
+
+    # Broadcast through Redis Pub/Sub → all instances fan out to SSE clients
+    broadcast_forum_global(forum_id, "new_forum_message", msg_payload)
 
     # Invalidate message cache for this forum
     invalidate(cache_keys.invalidate_forum_messages(forum_id))
 
-    return {"success": True, "message": "Message sent"}
+    return {"success": True, "message": "Message sent", "msg": msg_payload}
 
 
 def toggle_like(message_id, user_id) -> dict:

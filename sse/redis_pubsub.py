@@ -5,9 +5,8 @@ When a message is published to a Redis channel (from any instance),
 this subscriber picks it up and fans it out to local SSE clients
 on this instance.
 
-This enables horizontal scaling: multiple Render instances each
-run this subscriber, so an event from instance A reaches users
-connected to instance B.
+FIX: Removed duplicate message handling. We now use ONLY the manual
+dispatch in the loop (not callback handlers), which avoids double-delivery.
 """
 import json
 import threading
@@ -22,29 +21,32 @@ _subscriber_thread = None
 _running = False
 
 
-def _on_global_message(message):
+def _handle_global_message(raw_data):
     """Handle messages from the sse:global channel."""
     from sse.sse_manager import broadcast_local
     try:
-        data = json.loads(message["data"])
+        data = json.loads(raw_data)
         event_name = data.get("event", "update")
         event_data = data.get("data", {})
+        logger.info(f"PubSub received global event: {event_name}")
         broadcast_local(event_name, event_data)
     except Exception as e:
         logger.error(f"Error handling global SSE message: {e}")
 
 
-def _on_forum_message(message):
-    """Handle messages from sse:forum:* channels."""
+def _handle_forum_message(channel, raw_data):
+    """Handle messages from sse:forum:*:message channels."""
     from sse.sse_manager import broadcast_forum_local
     try:
-        channel = message["channel"]
         # channel format: "sse:forum:{forum_id}:message"
         parts = channel.split(":")
         if len(parts) >= 3:
             forum_id = int(parts[2])
-            data = json.loads(message["data"])
-            broadcast_forum_local(forum_id, "new_forum_message", data)
+            data = json.loads(raw_data)
+            event_name = data.get("event", "new_forum_message")
+            event_data = data.get("data", data)
+            logger.info(f"PubSub received forum event: forum={forum_id} event={event_name}")
+            broadcast_forum_local(forum_id, event_name, event_data)
     except Exception as e:
         logger.error(f"Error handling forum SSE message: {e}")
 
@@ -55,31 +57,54 @@ def _subscriber_loop():
     _running = True
 
     while _running:
+        pubsub = None
         try:
             pubsub = get_pubsub()
             if pubsub is None:
-                logger.info("Redis not available for Pub/Sub, retrying in 10s…")
+                logger.info("Redis not available for Pub/Sub, retrying in 10s...")
                 time.sleep(10)
                 continue
 
-            # Subscribe to channels
-            pubsub.subscribe(**{"sse:global": _on_global_message})
-            pubsub.psubscribe(**{"sse:forum:*:message": _on_forum_message})
+            # Subscribe WITHOUT callback handlers — we dispatch manually below
+            # This prevents the double-handling bug
+            pubsub.subscribe("sse:global")
+            pubsub.psubscribe("sse:forum:*:message")
 
-            logger.info("✅ Redis Pub/Sub subscriber started")
+            logger.info("Redis Pub/Sub subscriber active — listening for events")
 
-            # Listen for messages (blocking with timeout for clean shutdown)
             while _running:
                 message = pubsub.get_message(timeout=1.0)
-                if message and message["type"] in ("message", "pmessage"):
-                    if message.get("channel") == "sse:global":
-                        _on_global_message(message)
-                    elif message.get("channel", "").startswith("sse:forum:"):
-                        _on_forum_message(message)
+                if message is None:
+                    continue
+
+                msg_type = message.get("type", "")
+
+                # Regular channel message (sse:global)
+                if msg_type == "message":
+                    channel = message.get("channel", "")
+                    raw_data = message.get("data", "")
+
+                    if channel == "sse:global" and isinstance(raw_data, str):
+                        _handle_global_message(raw_data)
+
+                # Pattern-matched message (sse:forum:*:message)
+                elif msg_type == "pmessage":
+                    channel = message.get("channel", "")
+                    raw_data = message.get("data", "")
+
+                    if channel.startswith("sse:forum:") and isinstance(raw_data, str):
+                        _handle_forum_message(channel, raw_data)
 
         except Exception as e:
-            logger.error(f"Pub/Sub subscriber error: {e}, reconnecting in 5s…")
+            logger.error(f"Pub/Sub subscriber error: {e}, reconnecting in 5s...")
             time.sleep(5)
+        finally:
+            # Clean up pubsub connection on error
+            if pubsub is not None:
+                try:
+                    pubsub.close()
+                except Exception:
+                    pass
 
 
 def start_subscriber():
@@ -94,7 +119,7 @@ def start_subscriber():
         name="redis-pubsub-subscriber",
     )
     _subscriber_thread.start()
-    logger.info("🔄 Pub/Sub subscriber thread launched")
+    logger.info("Pub/Sub subscriber thread launched")
 
 
 def stop_subscriber():
