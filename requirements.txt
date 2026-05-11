@@ -3,30 +3,30 @@
 # Pin exact versions for reproducible Render deployments
 
 # ── Core Framework ────────────────────────────────────────
-Flask==2.3.3
-flask-cors==5.0.1
+Flask
+flask-cors
 
 # ── Configuration ─────────────────────────────────────────
-python-dotenv==1.1.0
+python-dotenv
 
 # ── Authentication ────────────────────────────────────────
-passlib==1.7.4
-PyJWT==2.9.0
+passlib
+PyJWT
 
 # ── Database ──────────────────────────────────────────────
-supabase==2.17.0
+supabase
 
 # ── HTTP ──────────────────────────────────────────────────
-requests==2.32.3
+requests
 
 # ── Production Server ─────────────────────────────────────
-gunicorn==25.1.0
+gunicorn
 
 # ── Caching & Realtime (Redis Pub/Sub + SSE) ──────────────
-redis==5.2.1
+redis
 
 # ── Image Processing ──────────────────────────────────────
-Pillow==11.0.0
+Pillow
 
 # ── Fast JSON Serialisation ───────────────────────────────
-orjson==3.10.15
+orjson
